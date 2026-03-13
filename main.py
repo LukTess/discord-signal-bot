@@ -1,18 +1,15 @@
-DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1481759403097985167/AASwl2p0p3NzatPh0rZwBDe_w1r-PhKEUcIFRfIVVwBvbdgUPMzSSfWJlDY4_yLjHQpV"
-SYMBOL = "BTCUSDT"  # ← change si tu trades ETHUSDT, SOLUSDT, etc.from flask import Flask, request, jsonify
+# Imports obligatoires
+from flask import Flask, request, jsonify
 import requests
 import ccxt
-import threading
 import time
 from datetime import datetime
 
+# Config
+DISCORD_WEBHOOK = "https://discord.com/api/webhooks/14815940309585167/AASw12p3NzatPh0rZwBde_w1r-PhKEUCIFRfwVWVbdgUPMzSS..."  # TON vrai webhook ici
+SYMBOL = "BTCUSDT"  # ou ETHUSDT, etc.
+
 app = Flask(__name__)
-
-# ==================== CONFIGURE ÇA ====================
-DISCORD_WEBHOOK = "https://discord.com/api/webhooks/XXXXXXXXXXXX"  # ← TON webhook Discord ici
-SYMBOL = "BTCUSDT"          # change si tu trades autre chose (ETHUSDT, SOLUSDT...)
-# =====================================================
-
 exchange = ccxt.binance()
 
 # Variables mémoire
