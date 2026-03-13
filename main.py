@@ -4,12 +4,14 @@ import requests
 import ccxt
 import time
 from datetime import datetime
+import threading   # pour le Lock
 
 # Config
-DISCORD_WEBHOOK = "https://discord.com/api/webhooks/14815940309585167/AASw12p3NzatPh0rZwBde_w1r-PhKEUCIFRfwVWVbdgUPMzSS..."  # TON vrai webhook ici
-SYMBOL = "BTCUSDT"  # ou ETHUSDT, etc.
+DISCORD_WEBHOOK = "https://discord.com/api/webhooks/14815940309585167/AA..."  # ton vrai webhook COMPLET ici !!
+SYMBOL = "BTCUSDT"  # ou "ETHUSDT", etc.
 
 app = Flask(__name__)
+
 exchange = ccxt.binance()
 
 # Variables mémoire
