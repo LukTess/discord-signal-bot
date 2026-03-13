@@ -1,5 +1,6 @@
 # =============================================
-# Discord Signal Bot - Version propre pour Railway
+# Discord Signal Bot - Protection hiérarchique TF courts
+# Règle : lower low sur TF → bloque tous < TF, warning sur = TF, accepte > TF
 # =============================================
 
 from flask import Flask, request, jsonify
@@ -10,98 +11,121 @@ import threading
 from datetime import datetime
 
 # ================== CONFIG ==================
-DISCORD_WEBHOOK = "https://discord.com/api/webhooks/14815940309585167/AA..."  # ← REMPLACE par ton webhook Discord COMPLET
-SYMBOL = "BTCUSDT"  # Change en ETHUSDT, SOLUSDT, etc. si tu veux
+DISCORD_WEBHOOK = "https://discord.com/api/webhooks/14815940309585167/AA..."  # ← TON WEBHOOK COMPLET
+SYMBOL = "BTCUSDT"
+
+PROTECTED_TFS = [1, 2, 3, 4, 5, 10, 15]               # TF qu'on protège
+RESET_TFS = [30, 45, 60, 120, 240, 360, 720, 1440]   # TF qui reset tout
+
+MONITOR_DURATION_MIN = 45                             # fenêtre surveillance lower low
+LOWER_LOW_THRESHOLD = 5                               # seuil $ pour ravalement
+WARNING_ON_SAME_TF = True                             # activer le warning sur même TF
 
 app = Flask(__name__)
 exchange = ccxt.binance()
 
-# Variables en mémoire
-last_1h_low = None
-invalidated = False
+# Variables mémoire
+blocked_below_tf = 0          # tous les signaux < ce TF sont bloqués (0 = rien bloqué)
+ravalement_last_tf = None
+ravalement_timestamp = 0
 lock = threading.Lock()
 
 # ================== FONCTIONS ==================
 def send_discord(message):
-    """Envoie un message sur Discord"""
     try:
         requests.post(DISCORD_WEBHOOK, json={"content": message})
-        print(f"[DISCORD] Message envoyé : {message[:100]}...")
-    except Exception as e:
-        print(f"[ERREUR DISCORD] {e}")
+        print(f"[DISCORD] {message[:100]}...")
+    except:
+        pass
 
 def price_monitor():
-    """Thread qui surveille les lower lows toutes les 20 secondes"""
-    global last_1h_low, invalidated
+    global blocked_below_tf, ravalement_last_tf, ravalement_timestamp
     while True:
         try:
             with lock:
-                if last_1h_low is None or invalidated:
-                    time.sleep(20)
+                now = time.time()
+                if ravalement_timestamp == 0 or now - ravalement_timestamp > MONITOR_DURATION_MIN * 60:
+                    time.sleep(15)
                     continue
-                
+
                 ticker = exchange.fetch_ticker(SYMBOL)
                 current_low = ticker['low']
-                
-                if current_low < last_1h_low - 5:  # -5 pour éviter les micro-bruits
-                    invalidated = True
-                    send_discord(f"⚠️ **SIGNAL 1H RAVALÉ** sur {SYMBOL}\n"
-                                 f"Nouveau low : {current_low:.2f}\n"
-                                 f"→ Tous les signaux 1H/45m/30m/15m sont bloqués jusqu’à un signal 2H+")
-        except Exception as e:
-            print(f"[ERREUR MONITOR] {e}")
-        time.sleep(20)
 
-# ================== ROUTES FLASK ==================
+                # On suppose qu'on a déjà un low de référence (à stocker au moment du signal)
+                if 'last_reference_low' in globals() and current_low < globals()['last_reference_low'] - LOWER_LOW_THRESHOLD:
+                    blocked_below_tf = ravalement_last_tf
+                    send_discord(f"⚠️ **Ravalement confirmé sur {ravalement_last_tf}m** ({SYMBOL})\n"
+                                 f"Nouveau low : {current_low:.2f}\n"
+                                 f"→ Bloque tous signaux < {ravalement_last_tf}m jusqu'à reset")
+                    ravalement_timestamp = 0  # on arrête la surveillance intensive
+
+        except:
+            pass
+        time.sleep(15)
+
+# ================== ROUTES ==================
 @app.route('/', methods=['GET'])
 def home():
-    """Page d'accueil pour tester que le bot tourne"""
-    return "✅ Discord Signal Bot is ALIVE !<br><br>Webhook endpoint : /webhook (POST only)", 200
+    return "Bot protection hiérarchique actif (1m-15m)", 200
 
 @app.route('/webhook', methods=['POST'])
 def tv_webhook():
-    global last_1h_low, invalidated
-    
+    global blocked_below_tf, ravalement_last_tf, ravalement_timestamp
+
     data = request.get_data(as_text=True).strip()
-    print(f"[WEBHOOK REÇU] {data}")  # Debug visible dans les logs Railway
-    
+    print(f"[WEBHOOK] {data}")
+
     if not data.startswith("POSITIVE|"):
         return jsonify({"status": "ignored"})
-    
+
     try:
         parts = data.split("|")
-        tf = parts[1]
+        tf_str = parts[1]
         low = float(parts[2].replace("low:", ""))
-        close_price = float(parts[3].replace("close:", ""))
         ticker = parts[4].replace("ticker:", "")
-        
-        tf_min = int(tf) if tf.isdigit() else 0
-        
+
+        tf = int(tf_str) if tf_str.isdigit() else 0
+
+        now = time.time()
         with lock:
-            if tf_min == 60:  # SIGNAL 1H
-                if invalidated:
-                    send_discord(f"❌ **NON ACHETÉ** – Signal 1H déjà ravalé sur {ticker}\n"
-                                 f"Attends un signal **2H ou supérieur**")
-                else:
-                    last_1h_low = low
-                    invalidated = False
-                    send_discord(f"🟢 **SIGNAL POSITIF 1H** détecté sur {ticker}\n"
-                                 f"Low noté : {low:.2f}\n"
-                                 f"Je surveille maintenant les lower lows...")
-                    
-            elif tf_min >= 120:  # SIGNAL 2H ou plus
-                invalidated = False
-                last_1h_low = None
-                send_discord(f"🔄 **SIGNAL {tf} détecté** → Invalidation 1H RESET\n"
-                             f"Tu peux à nouveau prendre les signaux 1H et inférieurs !")
-                
+            # 1. Cas RESET (signal supérieur)
+            if tf in RESET_TFS or (tf > max(PROTECTED_TFS) and tf >= 2 * blocked_below_tf):
+                blocked_below_tf = 0
+                ravalement_last_tf = None
+                ravalement_timestamp = 0
+                globals().pop('last_reference_low', None)
+                send_discord(f"🔄 **RESET** – Signal {tf}m détecté → tous les blocages supprimés\n"
+                             f"Signaux 1m–15m autorisés à nouveau")
+                return jsonify({"status": "reset"}), 200
+
+            # 2. Signal dans les TF protégés
+            if tf in PROTECTED_TFS:
+                if tf < blocked_below_tf:
+                    send_discord(f"❌ **IGNORÉ** – Signal {tf}m (inférieur au dernier ravalé {blocked_below_tf}m)")
+                    return jsonify({"status": "blocked"}), 200
+
+                # Accepte (avec warning si même niveau que dernier ravalement)
+                warning = ""
+                if WARNING_ON_SAME_TF and tf == ravalement_last_tf:
+                    warning = f"\n⚠️ **Méfiance** : on a déjà eu un {tf}m ravalé récemment → prudence\n" \
+                              f"Privilégie la patience ou attends un signal > {tf}m"
+
+                send_discord(f"🟢 **SIGNAL {tf}m ACCEPTÉ** sur {ticker}\n"
+                             f"Low noté : {low:.2f}{warning}")
+
+                # Prépare la surveillance lower low
+                globals()['last_reference_low'] = low
+                ravalement_last_tf = tf
+                ravalement_timestamp = now
+
+            else:
+                print(f"TF non protégé : {tf}m")
+
     except Exception as e:
-        print(f"[ERREUR PARSING] {e}")
-    
-    return jsonify({"status": "ok"}), 200
+        print(f"[ERREUR] {e}")
 
-# ================== LANCEMENT ==================
-# Démarrage du thread de surveillance
+    return jsonify({"status": "processed"}), 200
+
+# ================== START ==================
 threading.Thread(target=price_monitor, daemon=True).start()
-
-print("🚀 Bot démarré - Prêt à recevoir les webhooks TradingView")
+print("Bot démarré – Protection hiérarchique active")
