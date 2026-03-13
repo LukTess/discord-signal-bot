@@ -7,7 +7,7 @@ from datetime import datetime
 import threading   # pour le Lock
 
 # Config
-DISCORD_WEBHOOK = "https://discord.com/api/webhooks/14815940309585167/AA..."  # ton vrai webhook COMPLET ici !!
+DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1481759403097985167/AASwl2p0p3NzatPh0rZwBDe_w1r-PhKEUcIFRfIVVwBvbdgUPMzSSfWJlDY4_yLjHQpV"  # ton vrai webhook COMPLET ici !!
 SYMBOL = "BTCUSDT"  # ou "ETHUSDT", etc.
 
 app = Flask(__name__)
