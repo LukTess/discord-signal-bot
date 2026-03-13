@@ -45,23 +45,39 @@ def price_monitor():
             with lock:
                 now = time.time()
                 if ravalement_timestamp == 0 or now - ravalement_timestamp > MONITOR_DURATION_MIN * 60:
-                    time.sleep(15)
+                    time.sleep(30)
                     continue
 
-                ticker = exchange.fetch_ticker(SYMBOL)
-                current_low = ticker['low']
+                if ravalement_last_tf is None:
+                    time.sleep(30)
+                    continue
 
-                # On suppose qu'on a déjà un low de référence (à stocker au moment du signal)
-                if 'last_reference_low' in globals() and current_low < globals()['last_reference_low'] - LOWER_LOW_THRESHOLD:
+                # Récupère les dernières bougies du timeframe exact du signal
+                tf_str = f"{ravalement_last_tf}m"
+                ohlcv = exchange.fetch_ohlcv(SYMBOL, timeframe=tf_str, limit=3)
+
+                if len(ohlcv) < 2:
+                    time.sleep(30)
+                    continue
+
+                # Low de la bougie la plus récente terminée
+                current_candle_low = ohlcv[-2][3]  # index 3 = low
+
+                ref_low = globals().get('last_reference_low', None)
+                if ref_low is not None and current_candle_low < ref_low - LOWER_LOW_THRESHOLD:
                     blocked_below_tf = ravalement_last_tf
-                    send_discord(f"⚠️ **Ravalement confirmé sur {ravalement_last_tf}m** ({SYMBOL})\n"
-                                 f"Nouveau low : {current_low:.2f}\n"
-                                 f"→ Bloque tous signaux < {ravalement_last_tf}m jusqu'à reset")
-                    ravalement_timestamp = 0  # on arrête la surveillance intensive
+                    send_discord(
+                        f"⚠️ **Ravalement confirmé sur {ravalement_last_tf}m** ({SYMBOL})\n"
+                        f"Low bougie récente : {current_candle_low:.2f} < ref {ref_low:.2f} - {LOWER_LOW_THRESHOLD}$\n"
+                        f"→ Bloque TOUS signaux **< {ravalement_last_tf}m** jusqu'au reset"
+                    )
+                    print(f"[BLOCAGE ACTIVÉ] blocked_below_tf = {blocked_below_tf}")
+                    ravalement_timestamp = 0
+                    globals().pop('last_reference_low', None)
 
-        except:
-            pass
-        time.sleep(15)
+        except Exception as e:
+            print(f"[MONITOR ERROR] {e}")
+        time.sleep(30)  # 30s suffit largement
 
 # ================== ROUTES ==================
 @app.route('/', methods=['GET'])
